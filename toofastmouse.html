@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<script src="jquery.js"></script>
+		<script src="transit.js"></script>
+		<script src="color.js"></script>
+		<style>
+		html,body{
+			height: 100%;
+			width: 100%;
+			min-width: 700px;
+			min-height: 256px;
+			overflow: hidden;
+			cursor: crosshair;
+		}
+		#myCanvas{
+			position: absolute;
+			z-index: -1;
+			top:0;
+			left: 0;
+		}
+		ul{
+			list-style: none;
+		}
+		#HUD{
+			background: rgba(0,0,0,0.25);
+			position: absolute;
+			top: 0;
+			left: 0;
+			color: #FFF;
+			z-index: 1000;
+			border-bottom: 2px solid #000;
+			border-right: 2px solid #000;
+		}
+		#HUD div{
+			float: left;
+			padding: 10px;
+			border-right: 2px solid #FFF;
+		}
+		#HUD div:last-child{
+			border: none;
+		}
+		#cursor{
+			background: #FF00FF;
+			width: 5px;
+			height: 5px;
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+		#goalF{
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 20px;
+			height: 20px;
+		}
+		#gTop{
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			box-shadow: 12px 12px 12px #FF0;
+		}
+		#gLeft{
+			position: absolute;
+			top: 0;
+			left: 0;
+			height: 100%;
+			box-shadow: 12px 12px 12px #FF0;
+		}
+		#gRight{
+			position: absolute;
+			top: 0;
+			right: 0;
+			height: 100%;
+			box-shadow: 12px 12px 12px #FF0;
+		}
+		#gBottom{
+			position: absolute;
+			bottom: 0;
+			left: 0;
+			width: 100%;
+			box-shadow: 12px 12px 12px #FF0;
+		}
+		</style>
+		<script>
+			var audioEnabled = true, DEBUG = false,
+				lastUpdate = Date.now(),
+				mouseX = 0, prevX = 0, visX,
+				mouseY = 0, prevY = 0, visY,
+				speed = 0, skid = false,
+				shaking = false, curDang = 1,
+				health = 100, hMusic, dangerMusic = false, dead = false,
+				start,goal,score, prevShapes = [], marks =[];
+				canvas = undefined;
+
+			/*
+				Play's sound-MoarDammit2 Audo Engine - No comments available
+			*/
+			function playSound(e,t){if(!audioEnabled)return false;var n="./"+e+".ogg";if(navigator.userAgent.toLowerCase().indexOf("chrome")>-1){var r=new Audio(n);r.loop=t;r.play();return r}if($(".audio."+e).length<=0)if(t)$("#soundLayer").append("<audio loop class='audio "+e+"'' src='"+n+"'></audio>");else $("#soundLayer").append("<audio class='audio "+e+"'' src='"+n+"'></audio>");$(".audio."+e).trigger("play");return $(".audio."+e)}
+			function stopSound(e){
+				if(navigator.userAgent.toLowerCase().indexOf("chrome")>-1){
+					e.src = "";
+				} else {
+					e.remove();
+				}
+			}
+
+			var lastUpdate = Date.now();
+			var myInterval = setInterval(tick, 0);
+			setInterval(tick, 0);
+
+			setInterval(function(){
+				if(shaking)
+					return;
+				$("#myCanvas").css("left",0);
+				$("#myCanvas").css("top",0);
+				$("body").css("background","#FFF");
+			},20);
+
+			function dangerStuff(){
+				var col = "#FFF"
+				switch(curDang){
+					case 1: 
+						col = "#FF0000";
+						break;
+					case 2: 
+						col = "#00FF00";
+						break;
+					case 3: 
+						col = "#0000FF";
+						break;
+				}
+
+				$("body").css("background",col);
+				curDang = Math.floor((Math.random()*3)+1);
+			}
+
+			function tick() {
+			    var now = Date.now();
+			    var dt = now - lastUpdate;
+			    lastUpdate = now;
+
+			    speed = (Math.sqrt(Math.abs((mouseX-prevX))^2+(Math.abs(mouseY-prevY))^2)/dt)*1000;
+
+			    $("#health").text(Math.floor(health)+" HP");
+			    $("#skids").text("Skids: "+score.skids);
+			    $("#crashes").text("Crashes: "+score.crashes);
+			    $("#pickups").text("Pickups: "+score.pickups);
+			    if(DEBUG)
+					$("#info").html('<ul><li>CurrentMouse: ('+mouseX+','+mouseY+')</li>'+
+						'<li>PreviousMouse: ('+prevX+','+prevY+')</li>'+
+						'<li>GoalPos: ('+goal.X+','+goal.Y+')</li>'+
+						'<li>DeltaTime: '+dt+' ms</li>'+
+						'<li>CursorSpeed(pixel/second): '+speed+'</li>'+
+						'<li>Shaking?: '+shaking+'</li>'+
+						'<li>Health: '+health+'</li>'+
+						'<li>Skids: '+score.skids+'</li>'+
+						'<li>Pickups: '+score.pickups+'</li>'+
+						'<li>Crashes: '+score.crashes+'</li>'+
+						'<li>Skid?: '+skid+'</li></ul>');
+
+				if(health <= 0){
+					health = 0;
+					if(!dead){
+						dead = true;
+						playSound("death");
+					}
+				}
+
+				if(health <= 10){
+					if(!dangerMusic){
+						stopSound(hMusic);
+						dangerMusic = true;
+
+						hMusic = playSound("wubstep",true);
+					}
+
+					dangerStuff();
+				}
+
+				checkWin();
+
+				if(goal != undefined){
+					$("#goalF").css("left",goal.X);
+					$("#goalF").css("top",goal.Y);
+				}
+
+				if(speed >= 500){
+					skid = true;
+
+					marks.push({xVar: mouseX, yVar: mouseY, size: 10, color: '#000'});
+
+					score.skids++;
+					if (canvas.getContext) {
+						var ctx = canvas.getContext('2d');
+						ctx.fillStyle='#000';
+						ctx.fillRect(visX,visY,10,10);
+					}
+					playSound("screech");
+
+					if(mouseX <= 2 || mouseX >= $(document).width()-2)
+						shake(speed);
+
+					if(mouseY <= 2 || mouseY >= $(document).height()-2)
+						shake(speed);
+				}
+				prevX = mouseX;
+				prevY = mouseY;
+			}
+			//Make loader div follow mouse
+			$(document).mousemove(function(e){
+				//console.log(e.pageX);
+				//console.log(e.pageY);
+				mouseX = e.pageX -10;
+				mouseY = e.pageY -10;
+				visX = e.pageX;
+				visY = e.pageY;
+
+				if(start == undefined){
+					start = new Object();
+					start.X = mouseX;
+					start.Y = mouseY;
+					start.SizeX = 20;
+					start.SizeY = 20;
+					createStart();
+				}
+
+				displayStart();
+				checkCollision();
+				checkWin();
+
+				$("#cursor").css("left",visX);
+				$("#cursor").css("top",visY);
+			});
+
+			function checkWin(){
+				if(start == undefined || goal == undefined)
+					return false;
+
+				mX = mouseX;
+				mY = mouseY;
+
+				if((mX <= (goal.X+goal.SizeX/2) && mX >= (goal.X-goal.SizeX/2)) && (mY <= (goal.Y+goal.SizeY/2) && mY >= (goal.Y-goal.SizeY/2))){
+
+					//console.log(mX+"<="+(goal.X+goal.SizeX/2));
+					//console.log(mX+">="+(goal.X-goal.SizeX/2));
+					
+					//console.log(mY+"<="+(goal.Y+goal.SizeY/2));
+					//console.log(mY+">="+(goal.Y-goal.SizeY/2));
+
+					playSound("pickup");
+
+					score.pickups += 1;
+
+					prevShapes.push({xVar: start.X, yVar: start.Y, size: 20, color: '#0000FF'});
+
+					start.X = goal.X;
+					start.Y = goal.Y;
+
+					createGoodGoal();
+				}
+			}
+
+
+			function checkCollision(){
+				mX = mouseX;
+				mY = mouseY;
+				for (var i = prevShapes.length -1; i >= 0; i--) {
+					xVar = prevShapes[i].xVar;
+					yVar = prevShapes[i].yVar;
+					size = prevShapes[i].size;
+					if((mX <= (xVar+size/2) && mX >= (xVar-size/2)) && (mY <= (yVar+size/2) && mY >= (yVar-size/2)))
+						shake(1000);
+				}
+				return;
+				for (var i = marks.length -1; i >= 0; i--) {
+					xVar = marks[i].xVar;
+					yVar = marks[i].yVar;
+					size = marks[i].size;
+					if((mX <= (xVar+size/2) && mX >= (xVar-size/2)) && (mY <= (yVar+size/2) && mY >= (yVar-size/2)))
+						shake(1000);
+				}
+			}
+
+			function displayShapes(){
+				for (var i = prevShapes.length -1; i >= 0; i--) {
+					drawShape(prevShapes[i].xVar,prevShapes[i].yVar,prevShapes[i].size,prevShapes[i].color);
+				};
+				for (var i = marks.length -1; i >= 0; i--) {
+					drawShape(marks[i].xVar,marks[i].yVar,marks[i].size,marks[i].color);
+				};
+			}
+
+			function getMod(){
+				var mod = 0;
+				if(Math.floor((Math.random()*10)) > 5)
+					mod = 1;
+				else
+					mod = -1;
+
+				return mod;
+			}
+
+			function createGoodGoal(){
+				goal = new Object();
+
+				goal.SizeX = 20;
+				goal.SizeY = 20;
+
+				while(true){
+					scrWidth = $(document).width();
+					scrHeight = $(document).height();
+
+					xPar = Math.floor((Math.random()*(scrWidth/2))+100)*getMod();
+					yPar = Math.floor((Math.random()*(scrHeight/2))+100)*getMod();
+
+					fX = start.X + xPar;
+					fY = start.Y + yPar;
+					if((fX <= scrWidth-goal.SizeX && fX >= goal.SizeX) && (fY <= scrHeight-goal.SizeY && fY >= goal.SizeY))
+						break;
+				}
+
+				goal.X = fX;
+				goal.Y = fY;
+
+				displayGoal();
+			}
+
+			$(document).ready(function(){
+				canvas = document.getElementById('myCanvas');
+
+				canvas.width = $(document).width();
+				canvas.height = $(document).height();
+
+				hMusic = playSound("music",true);
+				score = new Object();
+				score.skids = 0;
+				score.pickups = 0;
+				score.crashes = 0;
+			});
+
+			function shake(speedn){
+				shaking = true;
+				health = health - speedn/1000;
+				playSound("crash");
+				score.crashes++;
+				for (var i = 0; i <= 20; i++) {
+					$("#myCanvas").animate({
+						top: Math.floor((Math.random()*40)+10)*(speedn/1000),
+						left: Math.floor((Math.random()*40)+10)*(speedn/1000)
+					},20,function(){
+						if($("#info").hasClass("shake")){
+							$("body").css("background","#FFF");
+							$("#info").removeClass("shake");
+						} else {
+							$("body").css("background","#FF0000");
+							$("#info").addClass("shake");
+						}
+					});
+				}
+
+				$("body").css("background","#FFF");
+				shaking = false;
+			}
+
+
+			function drawShape(xvar, yvar, size, color){
+				if (canvas.getContext) {
+					var ctx = canvas.getContext('2d');
+					ctx.fillStyle=color;
+					ctx.fillRect(xvar,yvar,size,size);
+				}
+			}
+			function displayGoal(){
+				if (canvas.getContext) {
+					var ctx = canvas.getContext('2d');
+					ctx.fillStyle='#FF0000';
+					ctx.fillRect(goal.X,goal.Y,goal.SizeX,goal.SizeY);
+				}
+			}
+
+			function displayStart(){
+				if (canvas.getContext) {
+					var ctx = canvas.getContext('2d');
+					ctx.fillStyle='#0000FF';
+					ctx.fillRect(start.X,start.Y,start.SizeX,start.SizeY);
+				}
+			}
+
+			function createStart(){
+				displayStart();
+				createGoodGoal();
+			}
+
+			$(window).resize(function(){
+				canvas.width = $(document).width();
+				canvas.height = $(document).height();
+				displayGoal();
+				displayStart();
+				displayShapes();
+			});
+			</script>
+	</head>
+	<body>
+		<div id="HUD">
+			<div id="health"></div>
+			<div id="pickups"></div>
+			<div id="crashes"></div>
+			<div id="skids"></div>
+		</div>
+		<div id="gameStuff">
+			<div id="gTop"></div>
+			<div id="gLeft"></div>
+			<div id="gRight"></div>
+			<div id="gBottom"></div>
+		</div>
+		<div id="cursor"></div>
+		<div id="goalF"></div>
+		<canvas id="myCanvas"></canvas>
+		<div id="info"></div>
+		<div id="soundLayer"></div>
+	</body>
+</html>
